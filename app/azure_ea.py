@@ -1,6 +1,7 @@
 from datetime import datetime
 
 import requests
+from pandas import DataFrame
 
 
 class AzureEA:
@@ -11,27 +12,29 @@ class AzureEA:
         self.header = {"Authorization": f"Bearer {access_key}"}
 
     def get_total_usage(self):
+
         uri = f"{self.base_url}/balancesummary"
         response = requests.get(url=uri, headers=self.header).json()
         return response[0]["totalUsage"]
 
     def get_period_usage(self, period=None):
-        results = []
+
         if not period:
             period = datetime.now().strftime("%Y%m")
         uri = f"{self.base_url}/billingPeriods/{period}/usagedetails"
         response = requests.get(url=uri, headers=self.header).json()
-        print(self._process_period_usage(response))
+        df = DataFrame(response["data"])
 
-    def _process_period_usage(self, response):
-        results = []
-        for entry in response["data"]:
-            results.append(
-                [
-                    entry["serviceName"],
-                    entry["subscriptionName"],
-                    entry["meterName"],
-                    entry["cost"],
-                ]
-            )
-        return results
+        while response["nextLink"] is not None:
+            response = requests.get(
+                url=response["nextLink"], headers=self.header
+            ).json()
+            df = df.append(response["data"], ignore_index=True)
+
+        df = df.reindex(
+            ["serviceName", "subscriptionName", "meterName", "cost"], axis=1
+        )
+
+        groups = df.groupby(["serviceName", "subscriptionName", "meterName"]).sum()
+
+        return groups
